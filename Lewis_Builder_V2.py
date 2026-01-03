@@ -1,250 +1,241 @@
 import streamlit as st
 import streamlit.components.v1 as components
+import uuid
 import json
 
-st.set_page_config(page_title="NH₃ Builder", layout="wide")
+st.set_page_config(page_title="Molecule Builder", layout="wide")
 
-st.title("🧪 Build Molecules with Bonds & Lone Pairs")
-st.write("Drag atoms, bonds, and electron pairs to assemble Lewis structures.")
+st.title("🧪 Free‑Form Molecule Builder")
+st.write("Drag atoms and bonds from the palette onto the canvas to build any molecule you like.")
 
-# Initialize positions
+# Session state for pieces on the canvas
 if "pieces" not in st.session_state:
-    st.session_state.pieces = {
-        "N": {"x": 350, "y": 150},
-        "H1": {"x": 100, "y": 50},
-        "H2": {"x": 600, "y": 50},
-        "H3": {"x": 350, "y": 300},
+    st.session_state.pieces = {}
 
-        # Original bonds
-        "bond1": {"x": 250, "y": 150},
-        "bond2": {"x": 450, "y": 150},
-        "bond3": {"x": 350, "y": 225},
-        "lone": {"x": 350, "y": 75},
+# Palette items
+PALETTE = [
+    {"label": "H", "type": "atom"},
+    {"label": "C", "type": "atom"},
+    {"label": "N", "type": "atom"},
+    {"label": "O", "type": "atom"},
+    {"label": "F", "type": "atom"},
+    {"label": "Cl", "type": "atom"},
+    {"label": "S", "type": "atom"},
+    {"label": "P", "type": "atom"},
+    {"label": "-", "type": "bond"},
+    {"label": "=", "type": "bond"},
+    {"label": "≡", "type": "bond"},
+    {"label": "••", "type": "lone"},
+]
 
-        # New palette items
-        "vdash": {"x": 700, "y": 50},
-        "dots_h": {"x": 700, "y": 150},
-        "dots_v": {"x": 700, "y": 250},
-
-        "dbl_h": {"x": 700, "y": 350},
-        "dbl_v": {"x": 750, "y": 350},
-
-        "tpl_h": {"x": 700, "y": 420},
-        "tpl_v": {"x": 750, "y": 420},
-    }
-
+# HTML + JS component
 components.html(
-    """
+    f"""
     <style>
-        #drag-area {
+        body {{
+            user-select: none;
+        }}
+
+        #container {{
+            display: flex;
+            gap: 20px;
+        }}
+
+        #palette {{
+            width: 150px;
+            border: 2px solid #ccc;
+            padding: 10px;
+            background: #fafafa;
+        }}
+
+        .palette-item {{
+            font-size: 32px;
+            padding: 8px;
+            margin: 6px 0;
+            border: 1px solid #aaa;
+            background: white;
+            text-align: center;
+            cursor: grab;
+        }}
+
+        #canvas {{
             width: 900px;
-            height: 550px;
+            height: 600px;
             border: 2px solid #ccc;
             position: relative;
             background: white;
-            user-select: none;
             overflow: hidden;
-        }
+        }}
 
-        .piece {
+        .piece {{
             position: absolute;
-            font-size: 70px;
+            font-size: 48px;
             cursor: grab;
-            transition: box-shadow 0.15s ease, transform 0.15s ease;
-        }
+        }}
 
-        .piece:active {
+        .piece:active {{
             cursor: grabbing;
-        }
+        }}
 
-        .glow {
-            box-shadow: 0 0 18px 4px rgba(0, 150, 255, 0.7);
-            transform: scale(1.05);
-        }
-
-        .lonepair {
-            font-size: 40px;
-        }
-
-        .bondv {
-            font-size: 70px;
-            line-height: 50px;
-        }
-
-        .double_v {
-            font-size: 70px;
-            line-height: 40px;
-        }
-
-        .triple_v {
-            font-size: 70px;
-            line-height: 30px;
-        }
+        .delete-btn {{
+            position: absolute;
+            top: -10px;
+            right: -10px;
+            background: red;
+            color: white;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            font-size: 14px;
+            text-align: center;
+            line-height: 20px;
+            cursor: pointer;
+        }}
     </style>
 
-    <div id="drag-area">
+    <div id="container">
 
-        <!-- Atoms -->
-        <div id="N" class="piece" style="left:350px; top:150px;">N</div>
-        <div id="H1" class="piece" style="left:100px; top:50px;">H</div>
-        <div id="H2" class="piece" style="left:600px; top:50px;">H</div>
-        <div id="H3" class="piece" style="left:350px; top:300px;">H</div>
+        <!-- Palette -->
+        <div id="palette">
+            <h4>Palette</h4>
+            {"".join(
+                f'<div class="palette-item" data-label="{item["label"]}" data-type="{item["type"]}">{item["label"]}</div>'
+                for item in PALETTE
+            )}
+        </div>
 
-        <!-- Original bonds -->
-        <div id="bond1" class="piece" style="left:250px; top:150px;">-</div>
-        <div id="bond2" class="piece" style="left:450px; top:150px;">-</div>
-        <div id="bond3" class="piece bondv" style="left:350px; top:225px;">|</div>
-
-        <!-- Lone pair -->
-        <div id="lone" class="piece lonepair" style="left:350px; top:75px;">••</div>
-
-        <!-- New palette items -->
-        <div id="vdash" class="piece bondv" style="left:700px; top:50px;">|</div>
-
-        <div id="dots_h" class="piece lonepair" style="left:700px; top:150px;">••</div>
-        <div id="dots_v" class="piece lonepair" style="left:700px; top:250px;">•<br>•</div>
-
-        <!-- Double bonds -->
-        <div id="dbl_h" class="piece" style="left:700px; top:350px;">=</div>
-        <div id="dbl_v" class="piece double_v" style="left:750px; top:350px;">|<br>|</div>
-
-        <!-- Triple bonds -->
-        <div id="tpl_h" class="piece" style="left:700px; top:420px;">≡</div>
-        <div id="tpl_v" class="piece triple_v" style="left:750px; top:420px;">|<br>|<br>|</div>
+        <!-- Canvas -->
+        <div id="canvas"></div>
 
     </div>
 
     <script>
-        const pieces = [
-            "N","H1","H2","H3",
-            "bond1","bond2","bond3","lone",
-            "vdash","dots_h","dots_v",
-            "dbl_h","dbl_v",
-            "tpl_h","tpl_v"
-        ];
+        const canvas = document.getElementById("canvas");
 
-        let active = null;
-        let offsetX = 0;
-        let offsetY = 0;
+        // Create a new piece on the canvas
+        function createPiece(label, type, x, y) {{
+            const id = "piece-" + Math.random().toString(36).substr(2, 9);
 
-        const targets = {
-            "N": {x:350, y:150},
-            "H1": {x:250, y:150},
-            "H2": {x:450, y:150},
-            "H3": {x:350, y:260},
-            "bond1": {x:300, y:150},
-            "bond2": {x:400, y:150},
-            "bond3": {x:350, y:200},
-            "lone": {x:350, y:80},
+            const el = document.createElement("div");
+            el.className = "piece";
+            el.id = id;
+            el.style.left = x + "px";
+            el.style.top = y + "px";
+            el.textContent = label;
 
-            "vdash": {x:700, y:50},
-            "dots_h": {x:700, y:150},
-            "dots_v": {x:700, y:250},
+            // Delete button
+            const del = document.createElement("div");
+            del.className = "delete-btn";
+            del.textContent = "×";
+            del.onclick = () => {{
+                el.remove();
+                sendUpdate(id, null, null, true);
+            }};
+            el.appendChild(del);
 
-            "dbl_h": {x:700, y:350},
-            "dbl_v": {x:750, y:350},
+            canvas.appendChild(el);
 
-            "tpl_h": {x:700, y:420},
-            "tpl_v": {x:750, y:420}
-        };
+            makeDraggable(el);
 
-        const snapDistance = 40;
+            sendUpdate(id, x, y, false, label, type);
+        }}
 
-        pieces.forEach(id => {
-            const el = document.getElementById(id);
+        // Drag from palette → create new piece
+        document.querySelectorAll(".palette-item").forEach(item => {{
+            item.addEventListener("mousedown", e => {{
+                const rect = canvas.getBoundingClientRect();
+                createPiece(
+                    item.dataset.label,
+                    item.dataset.type,
+                    50,
+                    50
+                );
+            }});
+        }});
+
+        // Make a piece draggable
+        function makeDraggable(el) {{
+            let active = false;
+            let offsetX = 0;
+            let offsetY = 0;
 
             el.addEventListener("mousedown", startDrag);
-            el.addEventListener("touchstart", startDrag);
 
-            function startDrag(e) {
-                active = el;
+            function startDrag(e) {{
+                if (e.target.classList.contains("delete-btn")) return;
+
+                active = true;
                 const rect = el.getBoundingClientRect();
-                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-                offsetX = clientX - rect.left;
-                offsetY = clientY - rect.top;
+                offsetX = e.clientX - rect.left;
+                offsetY = e.clientY - rect.top;
 
                 document.addEventListener("mousemove", drag);
                 document.addEventListener("mouseup", endDrag);
-                document.addEventListener("touchmove", drag);
-                document.addEventListener("touchend", endDrag);
-            }
+            }}
 
-            function drag(e) {
+            function drag(e) {{
                 if (!active) return;
 
-                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                const parent = canvas.getBoundingClientRect();
+                const x = e.clientX - parent.left - offsetX;
+                const y = e.clientY - parent.top - offsetY;
 
-                const x = clientX - offsetX;
-                const y = clientY - offsetY;
+                el.style.left = x + "px";
+                el.style.top = y + "px";
+            }}
 
-                active.style.left = x + "px";
-                active.style.top = y + "px";
-
-                const t = targets[active.id];
-                const dx = t.x - x;
-                const dy = t.y - y;
-                const dist = Math.sqrt(dx*dx + dy*dy);
-
-                if (dist < snapDistance * 1.5) {
-                    active.classList.add("glow");
-                } else {
-                    active.classList.remove("glow");
-                }
-            }
-
-            function endDrag() {
+            function endDrag(e) {{
                 if (!active) return;
+                active = false;
 
-                const rect = active.getBoundingClientRect();
-                const parent = document.getElementById("drag-area").getBoundingClientRect();
+                const parent = canvas.getBoundingClientRect();
+                const x = e.clientX - parent.left - offsetX;
+                const y = e.clientY - parent.top - offsetY;
 
-                let x = rect.left - parent.left;
-                let y = rect.top - parent.top;
-
-                const t = targets[active.id];
-                const dx = t.x - x;
-                const dy = t.y - y;
-                const dist = Math.sqrt(dx*dx + dy*dy);
-
-                if (dist < snapDistance) {
-                    x = t.x;
-                    y = t.y;
-                    active.style.left = x + "px";
-                    active.style.top = y + "px";
-                }
-
-                active.classList.remove("glow");
-
-                const payload = { id: active.id, x: x, y: y };
-
-                window.parent.postMessage(
-                    { "type": "streamlit:setComponentValue", "value": payload },
-                    "*"
-                );
-
-                active = null;
+                sendUpdate(el.id, x, y, false);
 
                 document.removeEventListener("mousemove", drag);
                 document.removeEventListener("mouseup", endDrag);
-                document.removeEventListener("touchmove", drag);
-                document.removeEventListener("touchend", endDrag);
-            }
-        });
+            }}
+        }}
+
+        // Send updates to Streamlit
+        function sendUpdate(id, x, y, deleted, label=null, type=null) {{
+            window.parent.postMessage(
+                {{
+                    "type": "streamlit:setComponentValue",
+                    "value": {{
+                        id, x, y, deleted, label, type
+                    }}
+                }},
+                "*"
+            );
+        }}
     </script>
     """,
-    height=600,
+    height=700,
 )
 
-# Receive JS → Python updates
+# Receive updates from JS
 event = st.experimental_get_query_params().get("streamlit_component_value")
 
 if event:
     try:
         data = json.loads(event[0])
-        if data["id"] in st.session_state.pieces:
-            st.session_state.pieces[data["id"]]["x"] = data["x"]
-            st.session_state.pieces[data["id"]]["y"] = data["y"]
+        pid = data["id"]
+
+        if data.get("deleted"):
+            if pid in st.session_state.pieces:
+                del st.session_state.pieces[pid]
+        else:
+            st.session_state.pieces[pid] = {
+                "x": data["x"],
+                "y": data["y"],
+                "label": data.get("label", st.session_state.pieces.get(pid, {}).get("label")),
+                "type": data.get("type", st.session_state.pieces.get(pid, {}).get("type")),
+            }
     except Exception:
         pass
+
+st.write("### Current pieces on canvas:")
+st.json(st.session_state.pieces)
